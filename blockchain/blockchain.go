@@ -7,10 +7,15 @@ import (
 	"crypto/sha256"
 )
 
+const (
+	POW_TARGET = 24
+)
+
 type BlockHeader struct {
-	CurHash []byte
-	PrevHash []byte
 	TimeStamp int64
+	PrevHash []byte
+	Nonce  int
+	CurHash []byte
 }
 
 
@@ -26,13 +31,33 @@ type BlockChain struct {
 }
 
 
-func (b *Block) SetHash() {
+func (block *Block) SetHashAuto() {
 
-	timestamp := []byte(strconv.FormatInt(b.BlockHeader.TimeStamp, 10))
-	headers := bytes.Join([][]byte{b.BlockHeader.PrevHash, []byte(b.Data), timestamp}, []byte{})
+	timestamp := []byte(strconv.FormatInt(block.BlockHeader.TimeStamp, 10))
+	headers := bytes.Join([][]byte{block.BlockHeader.PrevHash, []byte(block.Data), timestamp}, []byte{})
 	hash := sha256.Sum256(headers)
 
-	b.BlockHeader.CurHash = hash[:]
+	block.BlockHeader.CurHash = hash[:]
+}
+
+
+func (block *Block) SetHash(hasha []byte) {
+
+	timestamp := []byte(strconv.FormatInt(block.BlockHeader.TimeStamp, 10))
+	headers := bytes.Join([][]byte{block.BlockHeader.PrevHash, []byte(block.Data), timestamp}, []byte{})
+	hash := sha256.Sum256(headers)
+
+	block.BlockHeader.CurHash = hash[:]
+}
+
+func (block *Block) PrepareData() []byte {
+	timestamp := []byte(strconv.FormatInt(block.BlockHeader.TimeStamp, 10))
+	nonce := []byte(strconv.Itoa(block.BlockHeader.Nonce))
+	data := []byte(block.Data)
+
+	food := bytes.Join([][]byte{timestamp, block.BlockHeader.PrevHash, nonce, data}, []byte{})
+
+	return food
 }
 
 
@@ -46,8 +71,10 @@ func newGenesisBlock() *Block {
 		},
 		Data:"Genesis Block",
 	}
+	// block.SetHashAuto()
 
-	block.SetHash()
+	proof := NewProofOfWork(block, POW_TARGET)
+	proof.Pow()
 
 	return block
 }
@@ -79,7 +106,10 @@ func (bc *BlockChain) NewBlock(data string)  {
 	}
 
 	b.BlockHeader.PrevHash = lastBlock.BlockHeader.CurHash
-	b.SetHash()
+	// b.SetHashAuto()
+
+	proof := NewProofOfWork(b, POW_TARGET)
+	proof.Pow()
 
 	bc.Blocks = append(bc.Blocks, b)
 }
