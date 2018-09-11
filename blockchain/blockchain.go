@@ -7,9 +7,6 @@ import (
 	"crypto/sha256"
 )
 
-const (
-	POW_TARGET = 24
-)
 
 type BlockHeader struct {
 	TimeStamp int64
@@ -40,15 +37,6 @@ func (block *Block) SetHashAuto() {
 	block.BlockHeader.CurHash = hash[:]
 }
 
-
-func (block *Block) SetHash(hasha []byte) {
-
-	timestamp := []byte(strconv.FormatInt(block.BlockHeader.TimeStamp, 10))
-	headers := bytes.Join([][]byte{block.BlockHeader.PrevHash, []byte(block.Data), timestamp}, []byte{})
-	hash := sha256.Sum256(headers)
-
-	block.BlockHeader.CurHash = hash[:]
-}
 
 func (block *Block) PrepareData() []byte {
 	timestamp := []byte(strconv.FormatInt(block.BlockHeader.TimeStamp, 10))
