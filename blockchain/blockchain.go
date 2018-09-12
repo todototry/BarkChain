@@ -17,6 +17,15 @@ const (
 	BLOCKCHAIN_TIP_KEY = "TIP_OF_BLOCKCHAIN"
 )
 
+
+type errorString struct {
+	s string
+}
+
+func (e *errorString) Error() string {
+	return e.s
+}
+
 type BlockHeader struct {
 	TimeStamp int64
 	PrevHash []byte
@@ -111,13 +120,6 @@ func newGenesisBlock() *Block {
 func NewBlockChain() *BlockChain {
 	var bc = &BlockChain{}
 
-	// append GenesisBlock
-	blockGenesis := newGenesisBlock()
-	bc.Blocks = append(bc.Blocks, blockGenesis)
-	// update Tip
-	bc.Tip = blockGenesis.BlockHeader.CurHash
-
-
 	// create bolt Db
 	db, err := bolt.Open(DB_PATH, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err == nil {
@@ -126,21 +128,32 @@ func NewBlockChain() *BlockChain {
 		os.Exit(-1)
 	}
 
-	// save genesis blockGenesis to DB
+	// if bucket Not exists save genesis blockGenesis to DB
 	bc.Db.Update(func(tx *bolt.Tx) error {
-		bucket, err := tx.CreateBucketIfNotExists([]byte(BUCKET_NAME))
+		bucket:= tx.Bucket([]byte(BUCKET_NAME))
 
-		// save as kv after block serialized.
-		err = bucket.Put(blockGenesis.BlockHeader.CurHash, blockGenesis.Serialize())
-		return err
-	})
+		// if block data does not exist in DB
+		if bucket == nil {
+			bucket,err = tx.CreateBucket([]byte(BUCKET_NAME))
 
-	// save Tip
-	bc.Db.Update(func(tx *bolt.Tx) error {
-		bucket, err := tx.CreateBucketIfNotExists([]byte(BUCKET_NAME))
+			if err == nil {
+				// create and append GenesisBlock to bolt DB
+				blockGenesis := newGenesisBlock()
+				bc.Blocks = append(bc.Blocks, blockGenesis)
+				// update Tip
+				bc.Tip = blockGenesis.BlockHeader.CurHash
 
-		// save tip
-		err = bucket.Put([]byte(BLOCKCHAIN_TIP_KEY), blockGenesis.BlockHeader.CurHash)
+				// save as kv after block serialized.
+				err = bucket.Put(blockGenesis.BlockHeader.CurHash, blockGenesis.Serialize())
+
+				// save tip
+				err = bucket.Put([]byte(BLOCKCHAIN_TIP_KEY), blockGenesis.BlockHeader.CurHash)
+			}
+		} else {
+			// blocks already exists in DB.
+			bc.Tip = bucket.Get([]byte(BLOCKCHAIN_TIP_KEY))
+		}
+
 		return err
 	})
 
@@ -151,39 +164,89 @@ func NewBlockChain() *BlockChain {
 // new block for the blockchain.
 func (bc *BlockChain) NewBlock(data string)  {
 
-	lastIndex := len(bc.Blocks) - 1
-	lastBlock := bc.Blocks[lastIndex]
-
 	b := &Block{
 		BlockHeader: &BlockHeader{
 			CurHash:nil,
-			PrevHash:nil,
+			PrevHash:bc.Tip,
 			TimeStamp: time.Now().Unix(),
 		},
 		Data:data,
 	}
-
-	b.BlockHeader.PrevHash = lastBlock.BlockHeader.CurHash
-	// b.SetHashAuto()
-
+	// cal hash for pow
 	proof := NewProofOfWork(b, POW_TARGET)
 	proof.Pow()
 
-	bc.Blocks = append(bc.Blocks, b)
+	// update blockChain.Tip in mem.
 	bc.Tip = b.BlockHeader.CurHash
 
 	// save to bolt DB.
 	bc.Db.Update(func(tx *bolt.Tx) error {
 		tx.CreateBucketIfNotExists([]byte(BUCKET_NAME))
 
-		// save as kv after block serialized.
+		// 1. save as kv after block serialized  to bolt DB.
 		err := tx.Bucket([]byte(BUCKET_NAME)).Put(b.BlockHeader.CurHash, b.Serialize())
 
-		// update Tip
+		// 2. update Tip in bolt DB.
 		tx.Bucket([]byte(BUCKET_NAME)).Put([]byte(BLOCKCHAIN_TIP_KEY), b.BlockHeader.CurHash)
 
 		return err
 	})
 
-	bc.Db.Sync()
 }
+
+
+func (bc *BlockChain) Iterator() *BlockChainIterator {
+	bci:= &BlockChainIterator{bc.Tip, bc.Db}
+	return bci
+}
+
+
+type BlockChainIterator struct {
+	CurHash []byte
+	Db *bolt.DB
+}
+
+
+// iterate the blockchain.
+func (bci *BlockChainIterator) Next() *Block {
+	var b *Block
+
+	err := bci.Db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(BUCKET_NAME))
+
+		if bucket == nil{
+			// fail
+			return &errorString{"Bucket not exists..."}
+		} else {
+			k := bci.CurHash
+			// key is nil, indicates that finished iterate.
+			if k == nil {
+				b = nil
+				return nil
+			} else {
+				// get data and deserialize it.
+				v := bucket.Get(k)
+				if v == nil {
+					b = nil
+				} else {
+					b = Deserialize(v)
+				}
+			}
+
+			return nil
+		}
+	})
+
+	if err == nil {
+		// success
+		if b == nil {
+			return nil
+		} else {
+			bci.CurHash = b.BlockHeader.PrevHash
+			return 	b
+		}
+	} else {
+		return nil
+	}
+}
+
