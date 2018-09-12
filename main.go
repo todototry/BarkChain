@@ -21,5 +21,6 @@ func main()  {
 		fmt.Printf("%d, %x , %x,  %s  , %v \n",index, string(b.BlockHeader.PrevHash), string(b.BlockHeader.CurHash), b.Data, proof.Validate() )
 	}
 
+	bc.Db.Close()
 
 }

@@ -5,8 +5,17 @@ import (
 	"strconv"
 	"bytes"
 	"crypto/sha256"
+	"github.com/boltdb/bolt"
+	"os"
+	"encoding/gob"
+	"log"
 )
 
+const (
+	DB_PATH = "btc_blockchain.Db"
+	BUCKET_NAME= "BTC_BLOCKCHAIN"
+	BLOCKCHAIN_TIP_KEY = "TIP_OF_BLOCKCHAIN"
+)
 
 type BlockHeader struct {
 	TimeStamp int64
@@ -23,8 +32,9 @@ type Block struct {
 
 
 type BlockChain struct {
-	tip *Block
+	Tip    []byte
 	Blocks []*Block
+	Db     *bolt.DB
 }
 
 
@@ -49,6 +59,35 @@ func (block *Block) PrepareData() []byte {
 }
 
 
+func (block *Block) Serialize() []byte {
+	var buf bytes.Buffer
+	encoder := gob.NewEncoder(&buf)
+
+	err := encoder.Encode(*block)
+
+	if err != nil {
+		log.Panic(err)
+	}
+
+	return buf.Bytes()
+}
+
+
+func (block *Block) Deserialize(buf []byte) *Block {
+	var b Block
+	var data = bytes.NewReader(buf)
+
+	decoder := gob.NewDecoder(data)
+
+	err := decoder.Decode(b)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	return &b
+}
+
+
 func newGenesisBlock() *Block {
 
 	var block = &Block{
@@ -64,6 +103,7 @@ func newGenesisBlock() *Block {
 	proof := NewProofOfWork(block, POW_TARGET)
 	proof.Pow()
 
+	// save to Bolt DB.
 	return block
 }
 
@@ -72,8 +112,34 @@ func NewBlockChain() *BlockChain {
 	var bc = &BlockChain{}
 
 	// append GenesisBlock
-	block := newGenesisBlock()
-	bc.Blocks = append(bc.Blocks, block)
+	blockGenesis := newGenesisBlock()
+	bc.Blocks = append(bc.Blocks, blockGenesis)
+	// update Tip
+	bc.Tip = blockGenesis.BlockHeader.CurHash
+
+
+	// create bolt Db
+	db, err := bolt.Open(DB_PATH, 0600, &bolt.Options{Timeout: 1 * time.Second})
+	if err != nil {
+		bc.Db = db
+	} else {
+		os.Exit(-1)
+	}
+
+	// save genesis blockGenesis to DB
+	bc.Db.Update(func(tx *bolt.Tx) error {
+		tx.CreateBucketIfNotExists([]byte(BUCKET_NAME))
+
+		// save as kv after block serialized.
+		err := tx.Bucket([]byte(BUCKET_NAME)).Put(blockGenesis.BlockHeader.CurHash, blockGenesis.Serialize())
+
+		// save Tip
+		tx.Bucket([]byte(BUCKET_NAME)).Put([]byte(BLOCKCHAIN_TIP_KEY), blockGenesis.BlockHeader.CurHash)
+
+		return err
+	})
+
+
 	return bc
 }
 
@@ -100,4 +166,20 @@ func (bc *BlockChain) NewBlock(data string)  {
 	proof.Pow()
 
 	bc.Blocks = append(bc.Blocks, b)
+	bc.Tip = b.BlockHeader.CurHash
+
+	// save to bolt DB.
+	bc.Db.Update(func(tx *bolt.Tx) error {
+		tx.CreateBucketIfNotExists([]byte(BUCKET_NAME))
+
+		// save as kv after block serialized.
+		err := tx.Bucket([]byte(BUCKET_NAME)).Put(b.BlockHeader.CurHash, b.Serialize())
+
+		// update Tip
+		tx.Bucket([]byte(BUCKET_NAME)).Put([]byte(BLOCKCHAIN_TIP_KEY), b.BlockHeader.CurHash)
+
+		return err
+	})
+
+	bc.Db.Sync()
 }
