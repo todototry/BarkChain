@@ -63,7 +63,7 @@ func (block *Block) Serialize() []byte {
 	var buf bytes.Buffer
 	encoder := gob.NewEncoder(&buf)
 
-	err := encoder.Encode(*block)
+	err := encoder.Encode(block)
 
 	if err != nil {
 		log.Panic(err)
@@ -73,13 +73,13 @@ func (block *Block) Serialize() []byte {
 }
 
 
-func (block *Block) Deserialize(buf []byte) *Block {
+func Deserialize(buf []byte) *Block {
 	var b Block
 	var data = bytes.NewReader(buf)
 
 	decoder := gob.NewDecoder(data)
 
-	err := decoder.Decode(b)
+	err := decoder.Decode(&b)
 	if err != nil {
 		log.Panic(err)
 	}
@@ -120,7 +120,7 @@ func NewBlockChain() *BlockChain {
 
 	// create bolt Db
 	db, err := bolt.Open(DB_PATH, 0600, &bolt.Options{Timeout: 1 * time.Second})
-	if err != nil {
+	if err == nil {
 		bc.Db = db
 	} else {
 		os.Exit(-1)
@@ -128,17 +128,21 @@ func NewBlockChain() *BlockChain {
 
 	// save genesis blockGenesis to DB
 	bc.Db.Update(func(tx *bolt.Tx) error {
-		tx.CreateBucketIfNotExists([]byte(BUCKET_NAME))
+		bucket, err := tx.CreateBucketIfNotExists([]byte(BUCKET_NAME))
 
 		// save as kv after block serialized.
-		err := tx.Bucket([]byte(BUCKET_NAME)).Put(blockGenesis.BlockHeader.CurHash, blockGenesis.Serialize())
-
-		// save Tip
-		tx.Bucket([]byte(BUCKET_NAME)).Put([]byte(BLOCKCHAIN_TIP_KEY), blockGenesis.BlockHeader.CurHash)
-
+		err = bucket.Put(blockGenesis.BlockHeader.CurHash, blockGenesis.Serialize())
 		return err
 	})
 
+	// save Tip
+	bc.Db.Update(func(tx *bolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists([]byte(BUCKET_NAME))
+
+		// save tip
+		err = bucket.Put([]byte(BLOCKCHAIN_TIP_KEY), blockGenesis.BlockHeader.CurHash)
+		return err
+	})
 
 	return bc
 }

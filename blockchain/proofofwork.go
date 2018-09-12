@@ -9,7 +9,7 @@ import (
 
 const (
 
-	POW_TARGET = 24
+	POW_TARGET = 16
 )
 
 type ProofOfWork struct {
