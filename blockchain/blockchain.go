@@ -195,6 +195,48 @@ func (bc *BlockChain) NewBlock(data string)  {
 }
 
 
+// find specific block in blockchain.
+func (bc *BlockChain) FindBlock(hash []byte) (*Block, error) {
+
+	var b *Block
+
+	err := bc.Db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(BUCKET_NAME))
+
+		if bucket == nil{
+			// fail
+			return &errorString{"Bucket not exists..."}
+		} else {
+			if k := bc.Tip; k ==nil {
+				// key is nil, indicates that finished iterate.
+				b = nil
+				return nil
+			} else {
+				// get data and deserialize it.
+				for {
+					if v := bucket.Get(k); v != nil {
+						b = Deserialize(v)
+						// check whether we found it .
+						if bytes.Compare(b.BlockHeader.CurHash, hash) == 0 {
+							break
+						} else {
+							k = b.BlockHeader.PrevHash
+						}
+					}
+				}
+			}
+			return nil
+		}
+	})
+
+	if err != nil {
+		return nil, err
+	} else {
+		return b, nil
+	}
+}
+
+
 func (bc *BlockChain) Iterator() *BlockChainIterator {
 	bci:= &BlockChainIterator{bc.Tip, bc.Db}
 	return bci
